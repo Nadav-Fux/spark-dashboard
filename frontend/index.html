@@ -642,21 +642,35 @@ function initThree(){
     if(icoGroup.children[1]){icoGroup.children[1].rotation.x=-t*0.04;icoGroup.children[1].rotation.y=t*0.07;}
     if(icoGroup.children[2]){icoGroup.children[2].rotation.x=t*0.15;icoGroup.children[2].rotation.y=-t*0.12;}
     if(icoGroup.children[3]){icoGroup.children[3].rotation.x=t*0.02;icoGroup.children[3].rotation.y=-t*0.03;}
-    // Topology node float
+    // Topology node float + mouse-driven scene tilt
     var ni=0;
     topoGroup.children.forEach(function(n){
-      if(n.isMesh&&n.geometry.type==='OctahedronGeometry'){
-        n.rotation.x+=0.008;n.rotation.y+=0.012;
-        n.position.y+=Math.sin(t*0.8+ni*1.2)*0.003;
+      if(n.isMesh&&n._topoNode){
+        n.rotation.x+=0.003;n.rotation.y+=0.005;
+        n.position.y=n._origY+Math.sin(t*0.8+ni*1.2)*0.05;
+        if(n._glow){n._glow.position.y=n.position.y;}
         ni++;
       }
     });
+    // Subtle mouse-driven scene tilt (always active)
+    scene.rotation.y+=(mouseX*0.3-scene.rotation.y)*0.03;
+    scene.rotation.x+=(-mouseY*0.15-scene.rotation.x)*0.03;
     renderer.render(scene,camera);
   }
   animate();
 
   // Switch modes every 7 seconds
   setInterval(switchThreeMode,7000);
+
+  // Mouse interaction — scene tilts toward cursor
+  var mouseX=0,mouseY=0;
+  wrap.addEventListener('mousemove',function(e){
+    mouseX=(e.clientX/wrap.clientWidth-0.5)*2;
+    mouseY=(e.clientY/wrap.clientHeight-0.5)*2;
+  });
+  wrap.addEventListener('mouseleave',function(){
+    mouseX=0;mouseY=0;
+  });
 
   window.addEventListener('resize',function(){
     camera.aspect=wrap.clientWidth/wrap.clientHeight;
@@ -689,31 +703,59 @@ function buildTopology(containers){
   // Clear topoGroup
   while(topoGroup.children.length>0) topoGroup.remove(topoGroup.children[0]);
   topoNodes=[];
-  var running=containers.filter(function(c){return c.state==='running'||c.status.toLowerCase().indexOf('up')===0});
-  var count=Math.min(running.length,8);
-  var radius=5;
+
+  var count=Math.min(containers.length||1,10);
+  var angleStep=(Math.PI*2)/count;
+  var radius=Math.min(5,1.5+count*0.45);
+  var glowObjs=[];
+
   for(var i=0;i<count;i++){
-    var angle=(i/count)*Math.PI*2;
-    var x=Math.cos(angle)*radius,y=Math.sin(angle)*radius;
-    var mat=new THREE.MeshBasicMaterial({color:0x6bbf7a,wireframe:true,opacity:threeMode===1?0.6:0,transparent:true});
-    mat._base=0.6;
-    var mesh=new THREE.Mesh(new THREE.OctahedronGeometry(0.5,0),mat);
-    mesh.position.set(x,y,0);
+    var c=containers[i];
+    var isRunning=c.status&&c.status.toLowerCase().indexOf('up')===0;
+    var angle=angleStep*i-Math.PI/2;
+    var x=Math.cos(angle)*radius+(Math.random()-0.5)*0.4;
+    var y=Math.sin(angle)*radius*0.65+(Math.random()-0.5)*0.4;
+    var z=(Math.random()-0.5)*1.2;
+
+    // Node: amber=running, grey=stopped
+    var mat=new THREE.MeshPhongMaterial({
+      color:isRunning?0xd4a574:0x5a544e,
+      wireframe:true,transparent:true,
+      opacity:threeMode===1?0.65:0
+    });
+    mat._base=0.65;
+    var mesh=new THREE.Mesh(new THREE.IcosahedronGeometry(0.4,1),mat);
+    mesh.position.set(x,y,z);
+    mesh._topoNode=true;
+    mesh._origY=y;
     topoGroup.add(mesh);
-    topoNodes.push(new THREE.Vector3(x,y,0));
+    topoNodes.push(new THREE.Vector3(x,y,z));
+
+    // Green glow sphere for running containers
+    if(isRunning){
+      var gm=new THREE.MeshBasicMaterial({color:0x6bbf7a,transparent:true,opacity:threeMode===1?0.18:0});
+      gm._base=0.18;
+      var glow=new THREE.Mesh(new THREE.SphereGeometry(0.22,12,12),gm);
+      glow.position.set(x,y,z);
+      topoGroup.add(glow);
+      mesh._glow=glow;
+      glowObjs.push(glow);
+    }
   }
+
+  // Lines between all pairs
   for(var i=0;i<topoNodes.length;i++){
     for(var j=i+1;j<topoNodes.length;j++){
-      if(Math.random()>0.5) continue;
-      var lm=new THREE.LineBasicMaterial({color:0xd4a574,opacity:threeMode===1?0.1:0,transparent:true});
-      lm._base=0.1;
+      var lm=new THREE.LineBasicMaterial({color:0xd4a574,transparent:true,opacity:threeMode===1?0.08:0});
+      lm._base=0.08;
       topoGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([topoNodes[i],topoNodes[j]]),lm));
     }
   }
-  // Faint background ico for topology mode
-  var bm=new THREE.MeshBasicMaterial({color:0xd4a574,wireframe:true,opacity:threeMode===1?0.04:0,transparent:true});
+
+  // Faint background icosahedron for depth
+  var bm=new THREE.MeshBasicMaterial({color:0xd4a574,wireframe:true,transparent:true,opacity:threeMode===1?0.04:0});
   bm._base=0.04;
-  topoGroup.add(new THREE.Mesh(new THREE.IcosahedronGeometry(4,1),bm));
+  topoGroup.add(new THREE.Mesh(new THREE.IcosahedronGeometry(7,1),bm));
   topoGroup.visible=threeMode===1;
 }
 
