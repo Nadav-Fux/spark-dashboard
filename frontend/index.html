@@ -286,7 +286,6 @@ body::after{
   </div>
   <div class="hero-right">
     <div class="three-wrap" id="threeWrap"></div>
-    <div class="three-label" id="threeLabel">Orbital Core</div>
   </div>
 </section>
 
@@ -578,199 +577,154 @@ var setRam=initGauge($('#ramSvg'),'#b87333','#c65d3e');
 var setDisk=initGauge($('#diskSvg'),'#c65d3e','#a04030');
 
 /* ---- THREE.JS ---- */
-var scene,camera,renderer;
-var icoGroup,topoGroup;
-var threeMode=0; // 0=orbital, 1=topology
-var topoNodes=[];
-
 function initThree(){
   var wrap=$('#threeWrap');
   if(!wrap) return;
-  scene=new THREE.Scene();
-  camera=new THREE.PerspectiveCamera(50,wrap.clientWidth/wrap.clientHeight,0.1,1000);
-  camera.position.set(0,0,18);
-  renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+  var scene=new THREE.Scene();
+  var camera=new THREE.PerspectiveCamera(50,wrap.clientWidth/wrap.clientHeight,0.1,100);
+  camera.position.set(0,0,6);
+  var renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
   renderer.setSize(wrap.clientWidth,wrap.clientHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
-  wrap.appendChild(renderer.domElement);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  wrap.insertBefore(renderer.domElement,wrap.firstChild);
 
-  scene.add(new THREE.AmbientLight(0xffffff,0.3));
-  var pl1=new THREE.PointLight(0xd4a574,2,50); pl1.position.set(5,5,5); scene.add(pl1);
-  var pl2=new THREE.PointLight(0xb87333,1,40); pl2.position.set(-5,-3,3); scene.add(pl2);
-  var pl3=new THREE.PointLight(0xc65d3e,0.8,30); pl3.position.set(0,-6,6); scene.add(pl3);
+  // Asymmetric node cluster — fixed positions
+  var nodePositions=[
+    new THREE.Vector3(0,0.4,0),
+    new THREE.Vector3(1.6,0.8,-0.5),
+    new THREE.Vector3(-1.3,-0.6,0.4),
+    new THREE.Vector3(0.7,-1.1,-0.3),
+    new THREE.Vector3(-0.9,1.0,-0.6)
+  ];
 
-  /* ── GROUP A: ORBITAL CORE ───────────────────────── */
-  icoGroup=new THREE.Group();
+  var group=new THREE.Group();
+  var nodesMeshes=[];
+  var amberColor=new THREE.Color(0xD4A574);
+  var copperColor=new THREE.Color(0xB87333);
+  var greenColor=new THREE.Color(0x6BBF7A);
 
-  // Inner icosahedron — amber
-  var m1=new THREE.MeshBasicMaterial({color:0xd4a574,wireframe:true,opacity:0.22,transparent:true});
-  m1._base=0.22;
-  var ico1=new THREE.Mesh(new THREE.IcosahedronGeometry(3.6,1),m1);
-  icoGroup.add(ico1);
+  // Nodes
+  nodePositions.forEach(function(pos,i){
+    var geo=new THREE.IcosahedronGeometry(0.28+Math.random()*0.12,1);
+    var mat=new THREE.MeshBasicMaterial({
+      color:i%2===0?copperColor:amberColor,
+      wireframe:true,transparent:true,opacity:0.7
+    });
+    var mesh=new THREE.Mesh(geo,mat);
+    mesh.position.copy(pos);
+    mesh.userData={baseScale:1,phase:Math.random()*Math.PI*2};
+    group.add(mesh);
+    nodesMeshes.push(mesh);
 
-  // Outer icosahedron — copper
-  var m2=new THREE.MeshBasicMaterial({color:0xb87333,wireframe:true,opacity:0.09,transparent:true});
-  m2._base=0.09;
-  var ico2=new THREE.Mesh(new THREE.IcosahedronGeometry(6.2,1),m2);
-  icoGroup.add(ico2);
+    // Glow sphere
+    var glowGeo=new THREE.SphereGeometry(0.12,16,16);
+    var glowMat=new THREE.MeshBasicMaterial({color:greenColor,transparent:true,opacity:0.25});
+    var glow=new THREE.Mesh(glowGeo,glowMat);
+    glow.position.copy(pos);
+    group.add(glow);
+    mesh.userData.glow=glow;
+  });
 
-  // Inner core — terracotta dodecahedron
-  var m3=new THREE.MeshBasicMaterial({color:0xc65d3e,wireframe:true,opacity:0.32,transparent:true});
-  m3._base=0.32;
-  var ico3=new THREE.Mesh(new THREE.DodecahedronGeometry(1.8,0),m3);
-  icoGroup.add(ico3);
+  // Connections
+  var connections=[[0,1],[0,2],[0,3],[0,4],[1,3],[2,4],[1,4]];
+  connections.forEach(function(pair){
+    var pa=nodePositions[pair[0]],pb=nodePositions[pair[1]];
+    var points=[];
+    for(var s=0;s<=30;s++) points.push(new THREE.Vector3().lerpVectors(pa,pb,s/30));
+    var geo=new THREE.BufferGeometry().setFromPoints(points);
+    var mat=new THREE.LineBasicMaterial({color:amberColor,transparent:true,opacity:0.2});
+    group.add(new THREE.Line(geo,mat));
+  });
 
-  // Outer shell — very faint octahedron for depth
-  var m4=new THREE.MeshBasicMaterial({color:0xd4a574,wireframe:true,opacity:0.04,transparent:true});
-  m4._base=0.04;
-  var ico4=new THREE.Mesh(new THREE.OctahedronGeometry(8,2),m4);
-  icoGroup.add(ico4);
-
-  // Floating orbit particles
-  for(var i=0;i<28;i++){
-    var phi=Math.acos(2*Math.random()-1);
-    var theta=(i/28)*Math.PI*2;
-    var r=6.8+Math.random()*2;
-    var dm=new THREE.MeshBasicMaterial({color:0xd4a574,opacity:0.5+Math.random()*0.3,transparent:true});
-    dm._base=dm.opacity;
-    var dot=new THREE.Mesh(new THREE.SphereGeometry(0.06+Math.random()*0.04,4,4),dm);
-    dot.position.set(r*Math.sin(phi)*Math.cos(theta),r*Math.sin(phi)*Math.sin(theta),r*Math.cos(phi));
-    icoGroup.add(dot);
+  // Traveling particles along connections
+  var particleCount=connections.length*3;
+  var pPositions=new Float32Array(particleCount*3);
+  var particleData=[];
+  for(var i=0;i<particleCount;i++){
+    particleData.push({conn:Math.floor(i/3),t:Math.random(),speed:0.002+Math.random()*0.004});
   }
+  var pGeo=new THREE.BufferGeometry();
+  pGeo.setAttribute('position',new THREE.BufferAttribute(pPositions,3));
+  var pMat=new THREE.PointsMaterial({
+    color:amberColor,size:0.04,transparent:true,opacity:0.6,
+    blending:THREE.AdditiveBlending,sizeAttenuation:true
+  });
+  var particles=new THREE.Points(pGeo,pMat);
+  group.add(particles);
+  scene.add(group);
 
-  scene.add(icoGroup);
+  // Mouse drag with inertia
+  var isDragging=false;
+  var prevMouse={x:0,y:0};
+  var rotVel={x:0,y:0};
+  wrap.addEventListener('mousedown',function(e){isDragging=true;prevMouse={x:e.clientX,y:e.clientY};});
+  window.addEventListener('mousemove',function(e){
+    if(!isDragging) return;
+    var dx=e.clientX-prevMouse.x, dy=e.clientY-prevMouse.y;
+    rotVel.x+=dy*0.003; rotVel.y+=dx*0.003;
+    prevMouse={x:e.clientX,y:e.clientY};
+  });
+  window.addEventListener('mouseup',function(){isDragging=false;});
+  // Touch
+  wrap.addEventListener('touchstart',function(e){
+    if(e.touches.length===1){isDragging=true;prevMouse={x:e.touches[0].clientX,y:e.touches[0].clientY};}
+  },{passive:true});
+  wrap.addEventListener('touchmove',function(e){
+    if(!isDragging||e.touches.length!==1) return;
+    var dx=e.touches[0].clientX-prevMouse.x, dy=e.touches[0].clientY-prevMouse.y;
+    rotVel.x+=dy*0.003; rotVel.y+=dx*0.003;
+    prevMouse={x:e.touches[0].clientX,y:e.touches[0].clientY};
+  },{passive:true});
+  wrap.addEventListener('touchend',function(){isDragging=false;},{passive:true});
 
-  /* ── GROUP B: CONTAINER TOPOLOGY ────────────────── */
-  topoGroup=new THREE.Group();
-  topoGroup.visible=false;
-  scene.add(topoGroup);
-
-  /* ── ANIMATION LOOP ──────────────────────────────── */
+  var clock=new THREE.Clock();
   function animate(){
     requestAnimationFrame(animate);
-    var t=Date.now()*0.001;
-    // Orbital rotations
-    if(icoGroup.children[0]){icoGroup.children[0].rotation.x=t*0.07;icoGroup.children[0].rotation.y=t*0.11;}
-    if(icoGroup.children[1]){icoGroup.children[1].rotation.x=-t*0.04;icoGroup.children[1].rotation.y=t*0.07;}
-    if(icoGroup.children[2]){icoGroup.children[2].rotation.x=t*0.15;icoGroup.children[2].rotation.y=-t*0.12;}
-    if(icoGroup.children[3]){icoGroup.children[3].rotation.x=t*0.02;icoGroup.children[3].rotation.y=-t*0.03;}
-    // Topology node float + mouse-driven scene tilt
-    var ni=0;
-    topoGroup.children.forEach(function(n){
-      if(n.isMesh&&n._topoNode){
-        n.rotation.x+=0.003;n.rotation.y+=0.005;
-        n.position.y=n._origY+Math.sin(t*0.8+ni*1.2)*0.05;
-        if(n._glow){n._glow.position.y=n.position.y;}
-        ni++;
+    var t=clock.getElapsedTime();
+
+    // Auto-rotate with inertia
+    if(!isDragging) rotVel.y+=0.0003;
+    group.rotation.x+=rotVel.x;
+    group.rotation.y+=rotVel.y;
+    rotVel.x*=0.95; rotVel.y*=0.95;
+
+    // Breathing
+    group.scale.setScalar(1+Math.sin(t*0.8)*0.03);
+
+    // Node pulse + glow
+    nodesMeshes.forEach(function(mesh){
+      var ud=mesh.userData;
+      mesh.scale.setScalar(ud.baseScale+Math.sin(t*1.5+ud.phase)*0.08);
+      if(ud.glow){
+        ud.glow.material.opacity=0.15+Math.sin(t*2+ud.phase)*0.1;
+        ud.glow.scale.setScalar(0.8+Math.sin(t*1.2+ud.phase)*0.2);
       }
     });
-    // Auto-rotate + mouse tilt (mouseX/mouseY declared before this runs)
-    scene.rotation.y += 0.001 + mouseX*0.003;
-    scene.rotation.x += (-mouseY*0.1 - scene.rotation.x)*0.02;
+
+    // Particle travel
+    var posArr=particles.geometry.attributes.position.array;
+    for(var i=0;i<particleCount;i++){
+      var pd=particleData[i];
+      pd.t+=pd.speed; if(pd.t>1) pd.t-=1;
+      var conn=connections[pd.conn];
+      var pa=nodePositions[conn[0]],pb=nodePositions[conn[1]];
+      posArr[i*3]=pa.x+(pb.x-pa.x)*pd.t;
+      posArr[i*3+1]=pa.y+(pb.y-pa.y)*pd.t;
+      posArr[i*3+2]=pa.z+(pb.z-pa.z)*pd.t;
+    }
+    particles.geometry.attributes.position.needsUpdate=true;
+
     renderer.render(scene,camera);
   }
-
-  // Mouse interaction — declared BEFORE animate() to avoid hoisting NaN bug
-  var mouseX=0,mouseY=0;
   animate();
 
-  // Switch modes every 7 seconds
-  setInterval(switchThreeMode,7000);
-
-  // Mouse listeners
-  wrap.addEventListener('mousemove',function(e){
-    mouseX=(e.clientX/wrap.clientWidth-0.5)*2;
-    mouseY=(e.clientY/wrap.clientHeight-0.5)*2;
-  });
-  wrap.addEventListener('mouseleave',function(){
-    mouseX=0;mouseY=0;
-  });
-
-  window.addEventListener('resize',function(){
+  // Responsive resize
+  var ro=new ResizeObserver(function(){
     camera.aspect=wrap.clientWidth/wrap.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(wrap.clientWidth,wrap.clientHeight);
   });
-}
-
-function switchThreeMode(){
-  threeMode=1-threeMode;
-  var label=$('#threeLabel');
-  var DUR=1.8;
-  if(threeMode===1){
-    // Orbital → Topology
-    topoGroup.visible=true;
-    icoGroup.children.forEach(function(c){if(c.material) gsap.to(c.material,{opacity:0,duration:DUR,ease:'power2.inOut'})});
-    topoGroup.children.forEach(function(c){if(c.material) gsap.to(c.material,{opacity:c.material._base||0.5,duration:DUR,ease:'power2.inOut'})});
-    if(label) gsap.to(label,{opacity:0,duration:0.4,onComplete:function(){label.textContent='Container Topology';gsap.to(label,{opacity:1,duration:0.5})}});
-  } else {
-    // Topology → Orbital
-    icoGroup.children.forEach(function(c){if(c.material) gsap.to(c.material,{opacity:c.material._base||0.15,duration:DUR,ease:'power2.inOut'})});
-    topoGroup.children.forEach(function(c){if(c.material) gsap.to(c.material,{opacity:0,duration:DUR,ease:'power2.inOut'})});
-    // Hide topoGroup after fade
-    setTimeout(function(){if(threeMode===0) topoGroup.visible=false;},DUR*1000+200);
-    if(label) gsap.to(label,{opacity:0,duration:0.4,onComplete:function(){label.textContent='Orbital Core';gsap.to(label,{opacity:1,duration:0.5})}});
-  }
-}
-
-function buildTopology(containers){
-  // Clear topoGroup
-  while(topoGroup.children.length>0) topoGroup.remove(topoGroup.children[0]);
-  topoNodes=[];
-
-  var count=Math.min(containers.length||1,10);
-  var angleStep=(Math.PI*2)/count;
-  var radius=Math.min(5,1.5+count*0.45);
-  var glowObjs=[];
-
-  for(var i=0;i<count;i++){
-    var c=containers[i];
-    var isRunning=c.status&&c.status.toLowerCase().indexOf('up')===0;
-    var angle=angleStep*i-Math.PI/2;
-    var x=Math.cos(angle)*radius+(Math.random()-0.5)*0.4;
-    var y=Math.sin(angle)*radius*0.65+(Math.random()-0.5)*0.4;
-    var z=(Math.random()-0.5)*1.2;
-
-    // Node: amber=running, grey=stopped
-    var mat=new THREE.MeshPhongMaterial({
-      color:isRunning?0xd4a574:0x5a544e,
-      wireframe:true,transparent:true,
-      opacity:threeMode===1?0.65:0
-    });
-    mat._base=0.65;
-    var mesh=new THREE.Mesh(new THREE.IcosahedronGeometry(0.4,1),mat);
-    mesh.position.set(x,y,z);
-    mesh._topoNode=true;
-    mesh._origY=y;
-    topoGroup.add(mesh);
-    topoNodes.push(new THREE.Vector3(x,y,z));
-
-    // Green glow sphere for running containers
-    if(isRunning){
-      var gm=new THREE.MeshBasicMaterial({color:0x6bbf7a,transparent:true,opacity:threeMode===1?0.18:0});
-      gm._base=0.18;
-      var glow=new THREE.Mesh(new THREE.SphereGeometry(0.22,12,12),gm);
-      glow.position.set(x,y,z);
-      topoGroup.add(glow);
-      mesh._glow=glow;
-      glowObjs.push(glow);
-    }
-  }
-
-  // Lines between all pairs
-  for(var i=0;i<topoNodes.length;i++){
-    for(var j=i+1;j<topoNodes.length;j++){
-      var lm=new THREE.LineBasicMaterial({color:0xd4a574,transparent:true,opacity:threeMode===1?0.08:0});
-      lm._base=0.08;
-      topoGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([topoNodes[i],topoNodes[j]]),lm));
-    }
-  }
-
-  // Faint background icosahedron for depth
-  var bm=new THREE.MeshBasicMaterial({color:0xd4a574,wireframe:true,transparent:true,opacity:threeMode===1?0.04:0});
-  bm._base=0.04;
-  topoGroup.add(new THREE.Mesh(new THREE.IcosahedronGeometry(7,1),bm));
-  topoGroup.visible=threeMode===1;
+  ro.observe(wrap);
 }
 
 /* ---- SCROLL REVEAL ---- */
@@ -867,7 +821,6 @@ async function fetchContainers(){
       });
       grid.appendChild(card);
     });
-    if(scene) buildTopology(raw);
   }catch(e){console.warn('Containers:',e)}
 }
 
