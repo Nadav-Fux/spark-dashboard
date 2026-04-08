@@ -1,0 +1,241 @@
+{
+  "name": "Site Watchdog",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger_15min",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "https://log.nvision.me",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 3
+            }
+          }
+        }
+      },
+      "id": "ping_log",
+      "name": "Ping log.nvision.me",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 100],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "https://prompts.nvision.me",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 3
+            }
+          }
+        }
+      },
+      "id": "ping_prompts",
+      "name": "Ping prompts.nvision.me",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 260],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "https://yt.nvision.me",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 3
+            }
+          }
+        }
+      },
+      "id": "ping_yt",
+      "name": "Ping yt.nvision.me",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 420],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "https://n8n.74111147.xyz",
+        "options": {
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 3
+            }
+          }
+        }
+      },
+      "id": "ping_n8n",
+      "name": "Ping n8n.74111147.xyz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 580],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const sites = [\n  { name: 'log.nvision.me', node: 'Ping log.nvision.me' },\n  { name: 'prompts.nvision.me', node: 'Ping prompts.nvision.me' },\n  { name: 'yt.nvision.me', node: 'Ping yt.nvision.me' },\n  { name: 'n8n.74111147.xyz', node: 'Ping n8n.74111147.xyz' }\n];\n\nconst results = [];\nlet hasErrors = false;\n\nfor (const site of sites) {\n  try {\n    const data = $(site.node).first();\n    const statusCode = data?.json?.statusCode || data?.json?.headers ? 200 : 0;\n    const isError = !data || statusCode >= 400 || statusCode === 0;\n    \n    if (isError) hasErrors = true;\n    \n    results.push({\n      site: site.name,\n      status: isError ? 'DOWN' : 'UP',\n      statusCode: statusCode,\n      error: isError ? 'Request failed or returned error status' : null\n    });\n  } catch (e) {\n    hasErrors = true;\n    results.push({\n      site: site.name,\n      status: 'DOWN',\n      statusCode: 0,\n      error: e.message\n    });\n  }\n}\n\nreturn [{ json: { results, hasErrors, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "evaluate_results",
+      "name": "Evaluate All Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition_errors",
+              "leftValue": "={{ $json.hasErrors }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "has_errors",
+      "name": "Any Sites Down?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst downSites = data.results.filter(r => r.status === 'DOWN');\n\nconst subject = `SITE DOWN ALERT: ${downSites.map(s => s.site).join(', ')}`;\n\nlet rows = data.results.map(r => {\n  const color = r.status === 'UP' ? '#27ae60' : '#e74c3c';\n  return `<tr>\n    <td style=\"padding:8px;border:1px solid #ddd;\">${r.site}</td>\n    <td style=\"padding:8px;border:1px solid #ddd;color:${color};font-weight:bold;\">${r.status}</td>\n    <td style=\"padding:8px;border:1px solid #ddd;\">${r.statusCode}</td>\n    <td style=\"padding:8px;border:1px solid #ddd;\">${r.error || '-'}</td>\n  </tr>`;\n}).join('');\n\nconst body = `<html><body style=\"font-family:Arial,sans-serif;padding:20px;\">\n<h2 style=\"color:#e74c3c;\">Site Monitoring Alert</h2>\n<p>One or more monitored sites are reporting issues:</p>\n<table style=\"border-collapse:collapse;width:100%;\">\n<tr style=\"background:#f8f9fa;\"><th style=\"padding:8px;border:1px solid #ddd;\">Site</th><th style=\"padding:8px;border:1px solid #ddd;\">Status</th><th style=\"padding:8px;border:1px solid #ddd;\">Code</th><th style=\"padding:8px;border:1px solid #ddd;\">Error</th></tr>\n${rows}\n</table>\n<p style=\"color:#888;font-size:12px;\">Checked at ${data.timestamp}</p>\n<p><strong>Action:</strong> SSH into 77.90.40.84 and check Docker containers / Cloudflare DNS.</p>\n</body></html>`;\n\nreturn [{ json: { subject, body } }];"
+      },
+      "id": "build_alert",
+      "name": "Build Alert Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sparkemail@agentmail.to",
+        "toEmail": "nadavf@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send_alert",
+      "name": "Send Downtime Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1200, 200]
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          { "node": "Ping log.nvision.me", "type": "main", "index": 0 },
+          { "node": "Ping prompts.nvision.me", "type": "main", "index": 0 },
+          { "node": "Ping yt.nvision.me", "type": "main", "index": 0 },
+          { "node": "Ping n8n.74111147.xyz", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Ping log.nvision.me": {
+      "main": [
+        [
+          { "node": "Evaluate All Results", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Ping prompts.nvision.me": {
+      "main": [
+        [
+          { "node": "Evaluate All Results", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Ping yt.nvision.me": {
+      "main": [
+        [
+          { "node": "Evaluate All Results", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Ping n8n.74111147.xyz": {
+      "main": [
+        [
+          { "node": "Evaluate All Results", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Evaluate All Results": {
+      "main": [
+        [
+          { "node": "Any Sites Down?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Any Sites Down?": {
+      "main": [
+        [
+          { "node": "Build Alert Email", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Build Alert Email": {
+      "main": [
+        [
+          { "node": "Send Downtime Alert", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jerusalem"
+  },
+  "tags": [
+    { "name": "spark-dashboard" },
+    { "name": "monitoring" }
+  ],
+  "active": false
+}

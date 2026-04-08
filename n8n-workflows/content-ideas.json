@@ -1,0 +1,159 @@
+{
+  "name": "Content Ideas",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger_9am",
+      "name": "Daily 9 AM Israel",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://spark-dashboard:8888/api/jobs",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "get_trends",
+      "name": "Get Latest Trend Radar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const jobs = $input.first().json;\n\n// Find the latest trend-radar job\nlet trendData = null;\nif (Array.isArray(jobs)) {\n  const trendJobs = jobs.filter(j => j.type === 'trend-radar' && j.status === 'complete');\n  if (trendJobs.length > 0) {\n    trendJobs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));\n    trendData = trendJobs[0];\n  }\n} else if (jobs && jobs.type === 'trend-radar') {\n  trendData = jobs;\n}\n\nlet trendSummary = 'No recent trend data available.';\nif (trendData && trendData.data && trendData.data.cards) {\n  trendSummary = trendData.data.cards.slice(0, 10).map((c, i) => \n    `${i+1}. [${c.category}] ${c.title} - ${c.summary} (relevance: ${c.relevance}/10)`\n  ).join('\\n');\n}\n\nconst prompt = `You are a content strategist for nVision Digital AI, an AI-focused digital agency. Based on the latest tech trends below, generate exactly 3 content ideas.\n\nFor each idea provide:\n1. **title**: Catchy headline for a blog post or social media content\n2. **format**: One of: blog_post, linkedin_post, twitter_thread, video_script, case_study\n3. **hook**: Opening sentence that grabs attention (max 20 words)\n4. **outline**: 3-5 bullet points of key topics to cover\n5. **target_audience**: Who this content is for\n6. **estimated_impact**: low/medium/high with reasoning\n7. **trending_connection**: Which trend inspired this idea\n\nLatest Trends:\n${trendSummary}\n\nBrand context: nVision Digital AI helps businesses leverage AI agents, automation, and modern web technology. The owner Nadav is an expert in AI integration, digital marketing, and web development.\n\nReturn ONLY a valid JSON array of 3 objects. No markdown, no explanation.`;\n\nreturn [{ json: { prompt, trendSummary } }];"
+      },
+      "id": "build_content_prompt",
+      "name": "Build Content Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', messages: [{ role: 'system', content: 'You are a creative content strategist. Always respond with valid JSON only.' }, { role: 'user', content: $json.prompt }], max_tokens: 3000, temperature: 0.8 }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "nemotron_ideas",
+      "name": "Nemotron Ultra Generate Ideas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content || '[]';\n\nlet ideas;\ntry {\n  const jsonMatch = content.match(/\\[[\\s\\S]*\\]/);\n  ideas = JSON.parse(jsonMatch ? jsonMatch[0] : content);\n} catch(e) {\n  ideas = [{ title: 'Parse error', error: e.message, raw: content.substring(0, 500) }];\n}\n\nconst jobPayload = {\n  jobId: `content-ideas-${Date.now()}`,\n  type: 'content-ideas',\n  status: 'complete',\n  timestamp: new Date().toISOString(),\n  data: {\n    ideas: ideas.map((idea, i) => ({\n      id: `idea-${Date.now()}-${i}`,\n      ...idea\n    })),\n    basedOnTrends: $('Build Content Prompt').first().json.trendSummary.substring(0, 200)\n  }\n};\n\nreturn [{ json: jobPayload }];"
+      },
+      "id": "format_ideas",
+      "name": "Format Ideas for Dashboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://spark-dashboard:8888/api/jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "post_to_dashboard",
+      "name": "POST to Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 300],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily 9 AM Israel": {
+      "main": [
+        [
+          { "node": "Get Latest Trend Radar", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get Latest Trend Radar": {
+      "main": [
+        [
+          { "node": "Build Content Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build Content Prompt": {
+      "main": [
+        [
+          { "node": "Nemotron Ultra Generate Ideas", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Nemotron Ultra Generate Ideas": {
+      "main": [
+        [
+          { "node": "Format Ideas for Dashboard", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Ideas for Dashboard": {
+      "main": [
+        [
+          { "node": "POST to Dashboard", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jerusalem"
+  },
+  "tags": [
+    { "name": "spark-dashboard" },
+    { "name": "content" }
+  ],
+  "active": false
+}

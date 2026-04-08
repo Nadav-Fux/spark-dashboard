@@ -1,0 +1,261 @@
+{
+  "name": "Surprise Research",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 22 * * 6"
+            }
+          ]
+        }
+      },
+      "id": "trigger_sunday",
+      "name": "Sunday Midnight Israel (Sat 22 UTC)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', messages: [{ role: 'system', content: 'You are a research strategist for an AI-focused digital agency. Be creative and surprising in your topic selection.' }, { role: 'user', content: 'Based on current trends in AI agents, autonomous systems, digital marketing, and web development, pick ONE surprising and non-obvious topic that an AI-focused digital agency owner should know about this week. The topic should be something that is not yet mainstream but could have significant impact. Return a JSON object with fields: topic (string), search_query (string suitable for searching HN/Reddit), why_surprising (one sentence), initial_thesis (2-3 sentences on why this matters).' }], max_tokens: 1000, temperature: 0.9 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "pick_topic",
+      "name": "Pick Surprise Topic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content || '{}';\n\nlet topicData;\ntry {\n  const jsonMatch = content.match(/\\{[\\s\\S]*\\}/);\n  topicData = JSON.parse(jsonMatch ? jsonMatch[0] : content);\n} catch(e) {\n  topicData = {\n    topic: 'AI Agent Orchestration Patterns',\n    search_query: 'AI agent orchestration',\n    why_surprising: 'Fallback topic due to parse error',\n    initial_thesis: 'AI agent orchestration is becoming critical for multi-agent systems.'\n  };\n}\n\nreturn [{ json: topicData }];"
+      },
+      "id": "parse_topic",
+      "name": "Parse Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://hn.algolia.com/api/v1/search?query={{ encodeURIComponent($json.search_query) }}&tags=story&hitsPerPage=10",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "search_hn",
+      "name": "Search HN for Topic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://www.reddit.com/search.json?q={{ encodeURIComponent($json.search_query) }}&sort=relevance&t=month&limit=10",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "SparkDashboard/1.0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "search_reddit",
+      "name": "Search Reddit for Topic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const topic = $('Parse Topic').first().json;\nconst hnResults = $('Search HN for Topic').first().json;\nconst redditResults = $('Search Reddit for Topic').first().json;\n\n// Extract HN hits\nconst hnHits = (hnResults.hits || []).slice(0, 5).map(h => \n  `- [HN] ${h.title} (${h.points} pts) - https://news.ycombinator.com/item?id=${h.objectID}`\n).join('\\n');\n\n// Extract Reddit posts\nconst redditPosts = (redditResults?.data?.children || []).slice(0, 5).map(p =>\n  `- [Reddit] ${p.data.title} (${p.data.score} pts) - https://reddit.com${p.data.permalink}`\n).join('\\n');\n\nconst prompt = `You are writing a 2-page executive briefing for Nadav, owner of nVision Digital AI, an AI-focused digital agency in Israel.\n\nTOPIC: ${topic.topic}\nWhy it's surprising: ${topic.why_surprising}\nInitial thesis: ${topic.initial_thesis}\n\nRelated discussions found online:\n${hnHits || 'No HN results found'}\n${redditPosts || 'No Reddit results found'}\n\nWrite a comprehensive briefing in HTML format with:\n1. **Executive Summary** (3-4 sentences)\n2. **What's Happening** (detailed explanation with examples)\n3. **Why It Matters for Digital Agencies** (specific implications)\n4. **Opportunities & Action Items** (3-5 concrete steps Nadav could take)\n5. **Timeline** (when this becomes mainstream)\n6. **Sources & Further Reading** (include the links found above)\n\nUse professional HTML formatting with inline styles. Make it visually clean and scannable. Use headers, bullet points, and subtle color accents (#2563eb for headers, #f8fafc background for callout boxes).`;\n\nreturn [{ json: { prompt, topic: topic.topic, searchQuery: topic.search_query } }];"
+      },
+      "id": "build_research_prompt",
+      "name": "Build Research Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', messages: [{ role: 'system', content: 'You are an expert technology analyst. Write detailed, well-researched briefings in clean HTML.' }, { role: 'user', content: $json.prompt }], max_tokens: 4096, temperature: 0.6 }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "nemotron_research",
+      "name": "Nemotron Ultra Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst briefing = response.choices?.[0]?.message?.content || 'No briefing generated.';\nconst topic = $('Build Research Prompt').first().json.topic;\n\nconst jobPayload = {\n  jobId: `surprise-research-${Date.now()}`,\n  type: 'surprise-research',\n  status: 'complete',\n  timestamp: new Date().toISOString(),\n  data: {\n    topic,\n    briefingHtml: briefing,\n    searchQuery: $('Build Research Prompt').first().json.searchQuery\n  }\n};\n\nconst emailSubject = `Weekly Surprise Research: ${topic}`;\n\nreturn [{ json: { ...jobPayload, emailSubject, emailBody: briefing } }];"
+      },
+      "id": "format_output",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://spark-dashboard:8888/api/jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId: $json.jobId, type: $json.type, status: $json.status, timestamp: $json.timestamp, data: $json.data }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "post_dashboard",
+      "name": "POST to Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 200],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "fromEmail": "sparkemail@agentmail.to",
+        "toEmail": "nadavf@gmail.com",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "html": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "send_briefing",
+      "name": "Send Research Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1680, 400]
+    }
+  ],
+  "connections": {
+    "Sunday Midnight Israel (Sat 22 UTC)": {
+      "main": [
+        [
+          { "node": "Pick Surprise Topic", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Pick Surprise Topic": {
+      "main": [
+        [
+          { "node": "Parse Topic", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Parse Topic": {
+      "main": [
+        [
+          { "node": "Search HN for Topic", "type": "main", "index": 0 },
+          { "node": "Search Reddit for Topic", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Search HN for Topic": {
+      "main": [
+        [
+          { "node": "Build Research Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Search Reddit for Topic": {
+      "main": [
+        [
+          { "node": "Build Research Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build Research Prompt": {
+      "main": [
+        [
+          { "node": "Nemotron Ultra Research", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Nemotron Ultra Research": {
+      "main": [
+        [
+          { "node": "Format Output", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          { "node": "POST to Dashboard", "type": "main", "index": 0 },
+          { "node": "Send Research Email", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jerusalem"
+  },
+  "tags": [
+    { "name": "spark-dashboard" },
+    { "name": "research" },
+    { "name": "weekly" }
+  ],
+  "active": false
+}

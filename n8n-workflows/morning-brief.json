@@ -1,0 +1,263 @@
+{
+  "name": "Morning Brief",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 5 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger",
+      "name": "Daily 7:30 AM Israel",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd,ils&include_24hr_change=true",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "crypto_prices",
+      "name": "Get Crypto Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://open.er-api.com/v6/latest/USD",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "exchange_rate",
+      "name": "Get ILS/USD Rate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 260]
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast?latitude=32.08&longitude=34.78&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia/Jerusalem&forecast_days=1",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "weather",
+      "name": "Get Tel Aviv Weather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 420]
+    },
+    {
+      "parameters": {
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "hn_top_ids",
+      "name": "Get HN Top Story IDs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 580]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Take first 5 story IDs\nconst storyIds = $input.first().json;\nconst top5 = storyIds.slice(0, 5);\nreturn top5.map(id => ({ json: { storyId: id } }));"
+      },
+      "id": "extract_top5",
+      "name": "Extract Top 5 IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 580]
+    },
+    {
+      "parameters": {
+        "url": "=https://hacker-news.firebaseio.com/v0/item/{{ $json.storyId }}.json",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "hn_fetch_stories",
+      "name": "Fetch HN Story Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 580]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all HN stories into one item\nconst stories = $input.all().map(item => ({\n  title: item.json.title,\n  url: item.json.url || `https://news.ycombinator.com/item?id=${item.json.id}`,\n  score: item.json.score,\n  by: item.json.by\n}));\nreturn [{ json: { stories } }];"
+      },
+      "id": "aggregate_hn",
+      "name": "Aggregate HN Stories",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 580]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge all upstream data into a single prompt\nconst crypto = $('Get Crypto Prices').first().json;\nconst exchange = $('Get ILS/USD Rate').first().json;\nconst weather = $('Get Tel Aviv Weather').first().json;\nconst hnStories = $('Aggregate HN Stories').first().json.stories;\n\nconst ilsRate = exchange.rates ? exchange.rates.ILS : 'N/A';\n\nconst btcUsd = crypto.bitcoin?.usd || 'N/A';\nconst btcIls = crypto.bitcoin?.ils || 'N/A';\nconst btcChange = crypto.bitcoin?.usd_24h_change?.toFixed(2) || 'N/A';\nconst ethUsd = crypto.ethereum?.usd || 'N/A';\nconst ethIls = crypto.ethereum?.ils || 'N/A';\nconst ethChange = crypto.ethereum?.usd_24h_change?.toFixed(2) || 'N/A';\n\nconst tempMax = weather.daily?.temperature_2m_max?.[0] || 'N/A';\nconst tempMin = weather.daily?.temperature_2m_min?.[0] || 'N/A';\nconst rainChance = weather.daily?.precipitation_probability_max?.[0] || 'N/A';\n\nconst hnText = hnStories.map((s, i) => `${i+1}. ${s.title} (score: ${s.score}) - ${s.url}`).join('\\n');\n\nconst prompt = `Create a concise, well-formatted morning briefing email for Nadav, an AI-focused digital agency owner in Tel Aviv, Israel. Today's date: ${new Date().toISOString().split('T')[0]}.\n\nDATA:\n\n**Crypto:**\n- BTC: $${btcUsd} / ${btcIls} ILS (24h: ${btcChange}%)\n- ETH: $${ethUsd} / ${ethIls} ILS (24h: ${ethChange}%)\n\n**USD/ILS Rate:** ${ilsRate}\n\n**Tel Aviv Weather:**\n- High: ${tempMax}C, Low: ${tempMin}C\n- Rain probability: ${rainChance}%\n\n**Top Hacker News:**\n${hnText}\n\nFormat as a clean HTML email with sections. Use a professional but friendly tone. Add a one-line AI industry insight or tip at the end. Subject line should be catchy.`;\n\nreturn [{ json: { prompt, subject: `Morning Brief - ${new Date().toISOString().split('T')[0]}` } }];"
+      },
+      "id": "build_prompt",
+      "name": "Build AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', messages: [{ role: 'user', content: $json.prompt }], max_tokens: 2048, temperature: 0.7 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "nvidia_summarize",
+      "name": "Nemotron Ultra Summarize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content || 'No summary generated';\nconst subject = $('Build AI Prompt').first().json.subject;\n\n// Extract subject from AI response if it contains one\nlet emailSubject = subject;\nconst subjectMatch = content.match(/Subject:\\s*(.+)/i);\nif (subjectMatch) {\n  emailSubject = subjectMatch[1].trim();\n}\n\nreturn [{ json: { emailBody: content, subject: emailSubject } }];"
+      },
+      "id": "format_email",
+      "name": "Format Email Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sparkemail@agentmail.to",
+        "toEmail": "nadavf@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "send_email",
+      "name": "Send Morning Brief Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1820, 300]
+    }
+  ],
+  "connections": {
+    "Daily 7:30 AM Israel": {
+      "main": [
+        [
+          { "node": "Get Crypto Prices", "type": "main", "index": 0 },
+          { "node": "Get ILS/USD Rate", "type": "main", "index": 0 },
+          { "node": "Get Tel Aviv Weather", "type": "main", "index": 0 },
+          { "node": "Get HN Top Story IDs", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get Crypto Prices": {
+      "main": [
+        [
+          { "node": "Build AI Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get ILS/USD Rate": {
+      "main": [
+        [
+          { "node": "Build AI Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get Tel Aviv Weather": {
+      "main": [
+        [
+          { "node": "Build AI Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get HN Top Story IDs": {
+      "main": [
+        [
+          { "node": "Extract Top 5 IDs", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Extract Top 5 IDs": {
+      "main": [
+        [
+          { "node": "Fetch HN Story Details", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch HN Story Details": {
+      "main": [
+        [
+          { "node": "Aggregate HN Stories", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Aggregate HN Stories": {
+      "main": [
+        [
+          { "node": "Build AI Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build AI Prompt": {
+      "main": [
+        [
+          { "node": "Nemotron Ultra Summarize", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Nemotron Ultra Summarize": {
+      "main": [
+        [
+          { "node": "Format Email Content", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Email Content": {
+      "main": [
+        [
+          { "node": "Send Morning Brief Email", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jerusalem"
+  },
+  "tags": [
+    { "name": "spark-dashboard" },
+    { "name": "daily" }
+  ],
+  "active": false
+}

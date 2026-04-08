@@ -1,0 +1,291 @@
+{
+  "name": "Trend Radar",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger_6h",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "hn_ids",
+      "name": "Get HN Top Story IDs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ids = $input.first().json;\nreturn ids.slice(0, 30).map(id => ({ json: { storyId: id } }));"
+      },
+      "id": "slice_30",
+      "name": "Take Top 30",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 200]
+    },
+    {
+      "parameters": {
+        "url": "=https://hacker-news.firebaseio.com/v0/item/{{ $json.storyId }}.json",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "fetch_hn_stories",
+      "name": "Fetch HN Stories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const stories = $input.all().map(item => ({\n  title: item.json.title,\n  url: item.json.url || `https://news.ycombinator.com/item?id=${item.json.id}`,\n  score: item.json.score,\n  by: item.json.by,\n  source: 'hackernews'\n}));\nreturn [{ json: { hnStories: stories } }];"
+      },
+      "id": "aggregate_hn",
+      "name": "Aggregate HN",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://www.reddit.com/r/artificial/hot.json?limit=10",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "SparkDashboard/1.0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "reddit_ai",
+      "name": "Reddit r/artificial",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.reddit.com/r/MachineLearning/hot.json?limit=10",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "SparkDashboard/1.0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "reddit_ml",
+      "name": "Reddit r/MachineLearning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 560],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiData = $('Reddit r/artificial').first().json;\nconst mlData = $('Reddit r/MachineLearning').first().json;\n\nconst extractPosts = (data, sub) => {\n  try {\n    const posts = data?.data?.children || [];\n    return posts.map(p => ({\n      title: p.data.title,\n      url: `https://reddit.com${p.data.permalink}`,\n      score: p.data.score,\n      author: p.data.author,\n      source: `reddit/${sub}`\n    }));\n  } catch(e) {\n    return [];\n  }\n};\n\nconst redditPosts = [\n  ...extractPosts(aiData, 'artificial'),\n  ...extractPosts(mlData, 'MachineLearning')\n];\n\nreturn [{ json: { redditPosts } }];"
+      },
+      "id": "aggregate_reddit",
+      "name": "Aggregate Reddit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "const hn = $('Aggregate HN').first().json.hnStories;\nconst reddit = $('Aggregate Reddit').first().json.redditPosts;\n\nconst allItems = [...hn, ...reddit];\n\nconst prompt = `You are a trend analyst for an AI-focused digital agency. Score each of the following items for relevance to these topics: \"AI agents, automation, web development, digital marketing\".\n\nFor each item, provide:\n- relevance_score (0-10)\n- category (one of: ai_agents, automation, web_dev, digital_marketing, general_tech, other)\n- one_line_summary\n- why_it_matters (one sentence for the agency owner)\n\nReturn ONLY a valid JSON array of objects with fields: title, url, source, relevance_score, category, one_line_summary, why_it_matters. Sort by relevance_score descending. Only include items with score >= 5.\n\nItems:\n${allItems.map((item, i) => `${i+1}. [${item.source}] ${item.title} (score: ${item.score}) - ${item.url}`).join('\\n')}`;\n\nreturn [{ json: { prompt, allItemsCount: allItems.length } }];"
+      },
+      "id": "build_scoring_prompt",
+      "name": "Build Scoring Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'nvidia/nemotron-3-super-120b-a12b', messages: [{ role: 'system', content: 'You are a tech trend analyst. Always respond with valid JSON only, no markdown.' }, { role: 'user', content: $json.prompt }], max_tokens: 4096, temperature: 0.3 }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "nemotron_score",
+      "name": "Nemotron Super Score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1380, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.choices?.[0]?.message?.content || '[]';\n\nlet trends;\ntry {\n  // Try to extract JSON from the response\n  const jsonMatch = content.match(/\\[[\\s\\S]*\\]/);\n  trends = JSON.parse(jsonMatch ? jsonMatch[0] : content);\n} catch(e) {\n  trends = [{ title: 'Parse error', error: e.message, rawContent: content.substring(0, 500) }];\n}\n\n// Build dashboard cards\nconst cards = trends.slice(0, 15).map((t, i) => ({\n  id: `trend-${Date.now()}-${i}`,\n  title: t.title,\n  url: t.url,\n  source: t.source,\n  relevance: t.relevance_score,\n  category: t.category,\n  summary: t.one_line_summary,\n  insight: t.why_it_matters\n}));\n\nconst jobPayload = {\n  jobId: `trend-radar-${Date.now()}`,\n  type: 'trend-radar',\n  status: 'complete',\n  timestamp: new Date().toISOString(),\n  data: {\n    totalScanned: $('Build Scoring Prompt').first().json.allItemsCount,\n    relevantCount: cards.length,\n    cards\n  }\n};\n\nreturn [{ json: jobPayload }];"
+      },
+      "id": "format_results",
+      "name": "Format Dashboard Cards",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://spark-dashboard:8888/api/jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "post_dashboard",
+      "name": "POST to Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1820, 340],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": {
+      "main": [
+        [
+          { "node": "Get HN Top Story IDs", "type": "main", "index": 0 },
+          { "node": "Reddit r/artificial", "type": "main", "index": 0 },
+          { "node": "Reddit r/MachineLearning", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get HN Top Story IDs": {
+      "main": [
+        [
+          { "node": "Take Top 30", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Take Top 30": {
+      "main": [
+        [
+          { "node": "Fetch HN Stories", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch HN Stories": {
+      "main": [
+        [
+          { "node": "Aggregate HN", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Aggregate HN": {
+      "main": [
+        [
+          { "node": "Build Scoring Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Reddit r/artificial": {
+      "main": [
+        [
+          { "node": "Aggregate Reddit", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Reddit r/MachineLearning": {
+      "main": [
+        [
+          { "node": "Aggregate Reddit", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Aggregate Reddit": {
+      "main": [
+        [
+          { "node": "Build Scoring Prompt", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build Scoring Prompt": {
+      "main": [
+        [
+          { "node": "Nemotron Super Score", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Nemotron Super Score": {
+      "main": [
+        [
+          { "node": "Format Dashboard Cards", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Dashboard Cards": {
+      "main": [
+        [
+          { "node": "POST to Dashboard", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jerusalem"
+  },
+  "tags": [
+    { "name": "spark-dashboard" },
+    { "name": "trends" }
+  ],
+  "active": false
+}

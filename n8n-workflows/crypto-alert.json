@@ -1,0 +1,264 @@
+{
+  "name": "Crypto Alert",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "hourly_trigger",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 16 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "friday_trigger",
+      "name": "Friday 6PM Israel",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 600]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd,ils&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "get_crypto",
+      "name": "Get Crypto Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst btcChange = Math.abs(data.bitcoin?.usd_24h_change || 0);\nconst ethChange = Math.abs(data.ethereum?.usd_24h_change || 0);\n\nconst btcAlert = btcChange > 5;\nconst ethAlert = ethChange > 5;\nconst hasAlert = btcAlert || ethAlert;\n\nreturn [{\n  json: {\n    hasAlert,\n    btcPrice: data.bitcoin?.usd,\n    btcIls: data.bitcoin?.ils,\n    btcChange: data.bitcoin?.usd_24h_change?.toFixed(2),\n    btcChangeAbs: btcChange.toFixed(2),\n    btcMarketCap: data.bitcoin?.usd_market_cap,\n    btcVolume: data.bitcoin?.usd_24h_vol,\n    ethPrice: data.ethereum?.usd,\n    ethIls: data.ethereum?.ils,\n    ethChange: data.ethereum?.usd_24h_change?.toFixed(2),\n    ethChangeAbs: ethChange.toFixed(2),\n    ethMarketCap: data.ethereum?.usd_market_cap,\n    ethVolume: data.ethereum?.usd_24h_vol,\n    btcAlert,\n    ethAlert,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse_crypto",
+      "name": "Parse & Check Thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition_alert",
+              "leftValue": "={{ $json.hasAlert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check_alert",
+      "name": "Alert Threshold Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\nlet alertCoins = [];\nif (d.btcAlert) alertCoins.push(`BTC moved ${d.btcChange}%`);\nif (d.ethAlert) alertCoins.push(`ETH moved ${d.ethChange}%`);\n\nconst subject = `CRYPTO ALERT: ${alertCoins.join(', ')}`;\n\nconst body = `<html><body style=\"font-family: Arial, sans-serif; padding: 20px;\">\n<h2 style=\"color: #e74c3c;\">Crypto Price Alert</h2>\n<p>Significant price movement detected:</p>\n<table style=\"border-collapse: collapse; width: 100%;\">\n<tr style=\"background: #f8f9fa;\"><th style=\"padding: 10px; border: 1px solid #dee2e6;\">Coin</th><th style=\"padding: 10px; border: 1px solid #dee2e6;\">Price (USD)</th><th style=\"padding: 10px; border: 1px solid #dee2e6;\">Price (ILS)</th><th style=\"padding: 10px; border: 1px solid #dee2e6;\">24h Change</th></tr>\n<tr><td style=\"padding: 10px; border: 1px solid #dee2e6;\">Bitcoin</td><td style=\"padding: 10px; border: 1px solid #dee2e6;\">$${Number(d.btcPrice).toLocaleString()}</td><td style=\"padding: 10px; border: 1px solid #dee2e6;\">${Number(d.btcIls).toLocaleString()} ILS</td><td style=\"padding: 10px; border: 1px solid #dee2e6; color: ${parseFloat(d.btcChange) >= 0 ? 'green' : 'red'};\">${d.btcChange}%</td></tr>\n<tr><td style=\"padding: 10px; border: 1px solid #dee2e6;\">Ethereum</td><td style=\"padding: 10px; border: 1px solid #dee2e6;\">$${Number(d.ethPrice).toLocaleString()}</td><td style=\"padding: 10px; border: 1px solid #dee2e6;\">${Number(d.ethIls).toLocaleString()} ILS</td><td style=\"padding: 10px; border: 1px solid #dee2e6; color: ${parseFloat(d.ethChange) >= 0 ? 'green' : 'red'};\">${d.ethChange}%</td></tr>\n</table>\n<p style=\"color: #888; font-size: 12px;\">Alert triggered at ${d.timestamp}</p>\n</body></html>`;\n\nreturn [{ json: { subject, body } }];"
+      },
+      "id": "build_alert_email",
+      "name": "Build Alert Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sparkemail@agentmail.to",
+        "toEmail": "nadavf@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send_alert",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1160, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7&interval=daily",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "btc_weekly",
+      "name": "BTC Weekly Chart Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 600]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/coins/ethereum/market_chart?vs_currency=usd&days=7&interval=daily",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "eth_weekly",
+      "name": "ETH Weekly Chart Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 780]
+    },
+    {
+      "parameters": {
+        "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd,ils&include_24hr_change=true&include_7d_change=true&include_market_cap=true",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "weekly_prices",
+      "name": "Get Weekly Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 960]
+    },
+    {
+      "parameters": {
+        "jsCode": "const btcChart = $('BTC Weekly Chart Data').first().json;\nconst ethChart = $('ETH Weekly Chart Data').first().json;\nconst prices = $('Get Weekly Prices').first().json;\n\nconst btcPrices = btcChart.prices || [];\nconst ethPrices = ethChart.prices || [];\n\nconst formatDate = (ts) => new Date(ts).toLocaleDateString('en-IL');\n\nlet btcTable = btcPrices.map(p => `<tr><td style=\"padding:5px;border:1px solid #ddd;\">${formatDate(p[0])}</td><td style=\"padding:5px;border:1px solid #ddd;\">$${p[1].toLocaleString(undefined, {maximumFractionDigits:0})}</td></tr>`).join('');\nlet ethTable = ethPrices.map(p => `<tr><td style=\"padding:5px;border:1px solid #ddd;\">${formatDate(p[0])}</td><td style=\"padding:5px;border:1px solid #ddd;\">$${p[1].toLocaleString(undefined, {maximumFractionDigits:0})}</td></tr>`).join('');\n\nconst subject = `Weekly Crypto Summary - ${new Date().toISOString().split('T')[0]}`;\n\nconst body = `<html><body style=\"font-family:Arial,sans-serif;padding:20px;\">\n<h2>Weekly Crypto Summary</h2>\n<h3>Bitcoin (BTC)</h3>\n<p>Current: $${Number(prices.bitcoin?.usd).toLocaleString()} | Market Cap: $${Number(prices.bitcoin?.usd_market_cap/1e9).toFixed(1)}B</p>\n<table style=\"border-collapse:collapse;\"><tr style=\"background:#f8f9fa;\"><th style=\"padding:5px;border:1px solid #ddd;\">Date</th><th style=\"padding:5px;border:1px solid #ddd;\">Price</th></tr>${btcTable}</table>\n<h3>Ethereum (ETH)</h3>\n<p>Current: $${Number(prices.ethereum?.usd).toLocaleString()} | Market Cap: $${Number(prices.ethereum?.usd_market_cap/1e9).toFixed(1)}B</p>\n<table style=\"border-collapse:collapse;\"><tr style=\"background:#f8f9fa;\"><th style=\"padding:5px;border:1px solid #ddd;\">Date</th><th style=\"padding:5px;border:1px solid #ddd;\">Price</th></tr>${ethTable}</table>\n<p style=\"color:#888;font-size:12px;\">Generated ${new Date().toISOString()}</p>\n</body></html>`;\n\nreturn [{ json: { subject, body } }];"
+      },
+      "id": "build_weekly",
+      "name": "Build Weekly Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 780]
+    },
+    {
+      "parameters": {
+        "fromEmail": "sparkemail@agentmail.to",
+        "toEmail": "nadavf@gmail.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "html": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "send_weekly",
+      "name": "Send Weekly Summary",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [800, 780]
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          { "node": "Get Crypto Data", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get Crypto Data": {
+      "main": [
+        [
+          { "node": "Parse & Check Thresholds", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Parse & Check Thresholds": {
+      "main": [
+        [
+          { "node": "Alert Threshold Check", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Alert Threshold Check": {
+      "main": [
+        [
+          { "node": "Build Alert Email", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Build Alert Email": {
+      "main": [
+        [
+          { "node": "Send Alert Email", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Friday 6PM Israel": {
+      "main": [
+        [
+          { "node": "BTC Weekly Chart Data", "type": "main", "index": 0 },
+          { "node": "ETH Weekly Chart Data", "type": "main", "index": 0 },
+          { "node": "Get Weekly Prices", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "BTC Weekly Chart Data": {
+      "main": [
+        [
+          { "node": "Build Weekly Summary", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "ETH Weekly Chart Data": {
+      "main": [
+        [
+          { "node": "Build Weekly Summary", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get Weekly Prices": {
+      "main": [
+        [
+          { "node": "Build Weekly Summary", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build Weekly Summary": {
+      "main": [
+        [
+          { "node": "Send Weekly Summary", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jerusalem"
+  },
+  "tags": [
+    { "name": "spark-dashboard" },
+    { "name": "crypto" }
+  ],
+  "active": false
+}
