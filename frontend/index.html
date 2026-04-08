@@ -61,7 +61,7 @@ body::after{
 .gauges{padding:0 2.5rem;display:grid;grid-template-columns:repeat(3,1fr);gap:2rem}
 .gauge-card{background:var(--surface);border-radius:20px;padding:2rem;border:1px solid rgba(212,165,116,0.05);display:flex;flex-direction:column;align-items:center;position:relative;overflow:hidden}
 .gauge-card::after{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:60%;height:1px;background:linear-gradient(90deg,transparent,rgba(212,165,116,0.2),transparent)}
-.gauge-svg{width:180px;height:110px;margin-bottom:0.5rem}
+.gauge-svg{width:180px;height:108px;margin-bottom:0.5rem}
 .gauge-label{font-size:0.65rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--text4);font-weight:500;margin-bottom:0.3rem}
 .gauge-value{font-family:'JetBrains Mono',monospace;font-size:1.8rem;font-weight:600;color:var(--cream)}
 .gauge-detail{font-size:0.75rem;color:var(--text3);margin-top:0.3rem}
@@ -516,60 +516,77 @@ function shortCmd(cmd){
   return base.replace(/[-_]/g,' ').toLowerCase();
 }
 
-/* ---- SVG ARC GAUGE ---- */
+/* ---- SVG ARC GAUGE ----
+   Geometry: SVG convention — 0°=right, angles increase clockwise (Y-down).
+   cx=100 cy=93 r=71 → arc from 160° to 380°(=20°) spanning 220° clockwise.
+   All points stay within viewBox 200×120:
+     start/end y = 93 + 71*sin(160°) = 93+24.3 = 117.3  ✓ (<120)
+     top y       = 93 - 71            = 22               ✓
+---- */
 function initGauge(svgEl,color1,color2){
   var ns='http://www.w3.org/2000/svg';
-  var cx=100,cy=100,r=80;
-  var startAngle=Math.PI*0.8,endAngle=Math.PI*0.2;
-  var totalAngle=(2*Math.PI)-(startAngle-endAngle);
-  for(var i=0;i<=20;i++){
-    var a=startAngle+(totalAngle*i/20);
-    var isMajor=i%5===0;
-    var inner=r-(isMajor?12:7);
-    var x1=cx+Math.cos(a)*inner,y1=cy-Math.sin(a)*inner;
-    var x2=cx+Math.cos(a)*r,y2=cy-Math.sin(a)*r;
+  var cx=100,cy=93,r=71,spanDeg=220,startDeg=160;
+  function rad(d){return d*Math.PI/180;}
+  function pt(deg,radius){return {x:cx+radius*Math.cos(rad(deg)),y:cy+radius*Math.sin(rad(deg))};}
+  var s=pt(startDeg,r),e=pt(startDeg+spanDeg,r);
+
+  // Background track (full 220° arc, faint)
+  var bg=document.createElementNS(ns,'path');
+  bg.setAttribute('d','M'+s.x.toFixed(2)+','+s.y.toFixed(2)+' A'+r+','+r+' 0 1,1 '+e.x.toFixed(2)+','+e.y.toFixed(2));
+  bg.setAttribute('fill','none');bg.setAttribute('stroke','rgba(212,165,116,0.08)');
+  bg.setAttribute('stroke-width','8');bg.setAttribute('stroke-linecap','round');
+  svgEl.appendChild(bg);
+
+  // Tick marks
+  for(var i=0;i<=10;i++){
+    var td=startDeg+spanDeg*i/10,isMajor=i%5===0;
+    var p1=pt(td,r-(isMajor?15:9)),p2=pt(td,r-1);
     var tick=document.createElementNS(ns,'line');
-    tick.setAttribute('x1',x1);tick.setAttribute('y1',y1);tick.setAttribute('x2',x2);tick.setAttribute('y2',y2);
-    tick.setAttribute('stroke',isMajor?'rgba(212,165,116,0.3)':'rgba(212,165,116,0.12)');
-    tick.setAttribute('stroke-width',isMajor?1.5:0.8);tick.setAttribute('stroke-linecap','round');
+    tick.setAttribute('x1',p1.x.toFixed(2));tick.setAttribute('y1',p1.y.toFixed(2));
+    tick.setAttribute('x2',p2.x.toFixed(2));tick.setAttribute('y2',p2.y.toFixed(2));
+    tick.setAttribute('stroke',isMajor?'rgba(212,165,116,0.38)':'rgba(212,165,116,0.14)');
+    tick.setAttribute('stroke-width',isMajor?'1.5':'0.8');tick.setAttribute('stroke-linecap','round');
     svgEl.appendChild(tick);
   }
-  var sx=cx+Math.cos(startAngle)*(r-6),sy=cy-Math.sin(startAngle)*(r-6);
-  var ex2=cx+Math.cos(endAngle)*(r-6),ey2=cy-Math.sin(endAngle)*(r-6);
-  var bgArc=document.createElementNS(ns,'path');
-  bgArc.setAttribute('d','M'+sx+','+sy+' A'+(r-6)+','+(r-6)+' 0 1,1 '+ex2+','+ey2);
-  bgArc.setAttribute('fill','none');bgArc.setAttribute('stroke','rgba(212,165,116,0.06)');
-  bgArc.setAttribute('stroke-width','4');bgArc.setAttribute('stroke-linecap','round');
-  svgEl.appendChild(bgArc);
+
+  // Gradient (left→right following the arc direction)
   var defs=document.createElementNS(ns,'defs');
   var grad=document.createElementNS(ns,'linearGradient');
   var gid='g_'+svgEl.id;
-  grad.id=gid;
-  var s1=document.createElementNS(ns,'stop');s1.setAttribute('offset','0%');s1.setAttribute('stop-color',color1);
-  var s2=document.createElementNS(ns,'stop');s2.setAttribute('offset','100%');s2.setAttribute('stop-color',color2);
-  grad.appendChild(s1);grad.appendChild(s2);defs.appendChild(grad);svgEl.appendChild(defs);
-  var valArc=document.createElementNS(ns,'path');
-  valArc.setAttribute('fill','none');valArc.setAttribute('stroke','url(#'+gid+')');
-  valArc.setAttribute('stroke-width','4');valArc.setAttribute('stroke-linecap','round');
-  valArc.setAttribute('d','M'+sx+','+sy+' A'+(r-6)+','+(r-6)+' 0 0,1 '+sx+','+(sy+0.01));
-  svgEl.appendChild(valArc);
+  grad.id=gid;grad.setAttribute('gradientUnits','userSpaceOnUse');
+  grad.setAttribute('x1',s.x.toFixed(2));grad.setAttribute('y1',s.y.toFixed(2));
+  grad.setAttribute('x2',e.x.toFixed(2));grad.setAttribute('y2',e.y.toFixed(2));
+  var st1=document.createElementNS(ns,'stop');st1.setAttribute('offset','0%');st1.setAttribute('stop-color',color1);
+  var st2=document.createElementNS(ns,'stop');st2.setAttribute('offset','100%');st2.setAttribute('stop-color',color2);
+  grad.appendChild(st1);grad.appendChild(st2);defs.appendChild(grad);svgEl.appendChild(defs);
+
+  // Value arc (drawn on top of track)
+  var varc=document.createElementNS(ns,'path');
+  varc.setAttribute('fill','none');varc.setAttribute('stroke','url(#'+gid+')');
+  varc.setAttribute('stroke-width','8');varc.setAttribute('stroke-linecap','round');
+  varc.setAttribute('d','M'+s.x.toFixed(2)+','+s.y.toFixed(2)+' A'+r+','+r+' 0 0,1 '+s.x.toFixed(2)+','+(s.y+0.01).toFixed(2));
+  svgEl.appendChild(varc);
+
+  // Dot indicator
   var dot=document.createElementNS(ns,'circle');
-  dot.setAttribute('cx',sx);dot.setAttribute('cy',sy);dot.setAttribute('r','5');
-  dot.setAttribute('fill',color1);dot.setAttribute('opacity','0.8');
+  dot.setAttribute('r','5');dot.setAttribute('fill',color1);dot.setAttribute('opacity','0.9');
   svgEl.appendChild(dot);
-  var glow=document.createElementNS(ns,'circle');
-  glow.setAttribute('cx',sx);glow.setAttribute('cy',sy);glow.setAttribute('r','10');
-  glow.setAttribute('fill',color1);glow.setAttribute('opacity','0.15');
-  svgEl.appendChild(glow);
+  var glw=document.createElementNS(ns,'circle');
+  glw.setAttribute('r','11');glw.setAttribute('fill',color1);glw.setAttribute('opacity','0.18');
+  svgEl.appendChild(glw);
+
+  function moveDot(x,y){dot.setAttribute('cx',x);dot.setAttribute('cy',y);glw.setAttribute('cx',x);glw.setAttribute('cy',y);}
+  moveDot(s.x,s.y);
+
   return function setVal(pct){
     pct=Math.max(0,Math.min(100,pct));
-    var frac=pct/100;
-    var targetAngle=startAngle+totalAngle*frac;
-    var tx=cx+Math.cos(targetAngle)*(r-6),ty=cy-Math.sin(targetAngle)*(r-6);
-    var large=totalAngle*frac>Math.PI?1:0;
-    valArc.setAttribute('d','M'+sx+','+sy+' A'+(r-6)+','+(r-6)+' 0 '+large+',1 '+tx+','+ty);
-    dot.setAttribute('cx',tx);dot.setAttribute('cy',ty);
-    glow.setAttribute('cx',tx);glow.setAttribute('cy',ty);
+    if(pct<0.5){
+      varc.setAttribute('d','M'+s.x.toFixed(2)+','+s.y.toFixed(2)+' A'+r+','+r+' 0 0,1 '+s.x.toFixed(2)+','+(s.y+0.01).toFixed(2));
+      moveDot(s.x,s.y); return;
+    }
+    var arcDeg=spanDeg*pct/100,t=pt(startDeg+arcDeg,r),large=arcDeg>180?1:0;
+    varc.setAttribute('d','M'+s.x.toFixed(2)+','+s.y.toFixed(2)+' A'+r+','+r+' 0 '+large+',1 '+t.x.toFixed(2)+','+t.y.toFixed(2));
+    moveDot(t.x,t.y);
   };
 }
 var setCpu=initGauge($('#cpuSvg'),'#d4a574','#b87333');
